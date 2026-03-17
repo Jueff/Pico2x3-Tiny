@@ -1,0 +1,1 @@
+pio run -t upload -e Pico2x3-Tiny --upload-port COM15
