@@ -2,6 +2,7 @@
   "name": "Pico2x3-Tiny",
   "version": "{APP_VERSION}",
   "license": "BSL-1.1-or-later",
+  "platform": "MLL512V1",
   "DE": {
     "short": "ATTiny kompatibles 3-fach Sound und 3-fach Servomodul",
     "detail": "Steuert drei Soundmodule und drei Servos mit einer PicoSoundServo 512 Platine. Das Protokoll ist kompatibel zur ATTiny Version."
