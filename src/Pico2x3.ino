@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: 2025-2026 Juergen Winkler <MobaLedLib@gmx.at>
- * SPDX-License-Identifier: CC-BY-NC-4.0
+ * SPDX-License-Identifier: BSL-1.1
  *
  * Description:
  *  This firmware runs on a Raspberry Pi Pico and controls up to 6 servo motors.
@@ -25,7 +25,7 @@ using namespace ace_button;
 #define STRINGIFY(x) STRINGIFY2(x)
 #endif
 
-// Fallback, falls APP_VERSION nicht gesetzt ist
+// fallback in case APP_VERSION is not set
 #ifndef APP_VERSION
 #define APP_VERSION 0.0
 #endif
@@ -49,7 +49,7 @@ const char* bootMessage = "MobaLedLib Pico 3x-Sound 3x-Servo ATTiny V" STRINGIFY
 
 // LED receiver members
 LEDReceiver* pLEDReceiver;
-bool dataChanged = false;
+
 uint8_t ledData[NUM_LEDS_TO_EMULATE * 3];
 
 // servo members
@@ -77,7 +77,9 @@ uint8_t lastSignal = 0xff;
 const uint8_t HB_INPUT = 0;
 const uint8_t MAX_SIGNAL = 4;
 const uint8_t MAX_BRIGHT = 20;
+CHSV HSV;
 
+// MobaLedLib
 CRGB leds[NUM_LEDS];
 
 MobaLedLib_Configuration()
@@ -86,7 +88,7 @@ MobaLedLib_Configuration()
   Blink3(0, C_YELLOW, HB_INPUT + 1, 0.5 Sek, 0.5 Sek, 5, MAX_BRIGHT, 0)             // yellow flashing
   Blink3(0, C_RED, HB_INPUT + 2, 0.5 Sek, 0.5 Sek, 5, MAX_BRIGHT, 0)                // red flashing
   // APatternT1(0, 193, HB_INPUT + 3, 1, 5, MAX_BRIGHT, 0, PF_EASEINOUT, 1 Sec, 1)  // green fading
-  ConstRGB(0, HB_INPUT + 3, 0, 0, 0, 0, 5, 0)                                       // minimal constant green
+  ConstRGB(0, HB_INPUT + 3, 0, 0, 0, 0, 0, 0)                                       // led off
   PatternT4(0, _NStru(C1, 4, 1), HB_INPUT + 4, _Cx2LedCnt(C1), 0, 255, 0, 0, 24 ms, 74 ms, 24 ms, 512 ms, _Cx2P_DBLFL(C1))  // red warning flashlight
   EndCfg // End of the configuration
 };
@@ -119,7 +121,6 @@ void setSignal(LEDReceiver::State signal)
   MLLAPP_LOG(3, "Set signal %d\r\n", newSignal);
   MobaLedLib.Set_Input(HB_INPUT + newSignal, 1);
 }
-
 
 void setup()
 {
@@ -155,9 +156,7 @@ void setup()
     FlashStorage::LogLevel = 0;
     LogLevel = 0;
   }
-
   MLLAPP_LOG(1, bootMessage);
-
   MLLAPP_LOG(3, "Initialize LED Receiver");
   pLEDReceiver = new LEDReceiver(&ledData[0], NUM_LEDS_TO_EMULATE, NUM_LEDS_TO_SKIP, DATA_IN_PIN, DATA_OUT_PIN);
 
@@ -196,7 +195,7 @@ void setupServos(FlashStorage* pStorage, uint8_t basePin)
   for (int i = 0; i < NUM_SERVO_CONTROLLERS; i++)
   {
     uint8_t pins[3] = { (uint8_t)(basePin+i*3), (uint8_t)(basePin+1 + i * 3), (uint8_t)(basePin+2 + i * 3) };
-    pConfigurator[i] = new ServoConfigurator(pStorage, 0, 3, pins);
+    pConfigurator[i] = new ServoConfigurator(pStorage, i*3, 3, pins);
   }
 }
 
@@ -263,15 +262,24 @@ void updateServos(uint8_t ledOffset)
         turnInputsOff();
       }
       // use fastled to set the HSV value of led[0]
-      CHSV HSV;
       if (HSV.hue != hue)
       {
         HSV.hue = hue;
-        MLLAPP_LOG(4, "Servo %d in setup mode, position = %f hue = %d\r\n", i, pConfigurator[i]->getPercentage(), HSV.hue);
         HSV.sat = 255;
-        HSV.val = 100;
+        MLLAPP_LOG(4, "Servo %d in setup mode, position = %f hue = %d\r\n", i, pConfigurator[i]->getPercentage(), HSV.hue);
+      }
+
+      // if the percentage is below 10% or above 90%, make the LED blink to show possible critical values, otherwise show a constant light
+      if (pConfigurator[i]->getPercentage() < 0.1 || pConfigurator[i]->getPercentage() > 0.9)
+      {
+        HSV.val = (millis() & 0x80)>0 ? 100: 0;
         leds[0] = HSV;
       }
+      else
+      { 
+        HSV.val = 100;
+      }
+      leds[0] = HSV;
       break;
     }
   }
@@ -288,6 +296,10 @@ void updateSound(uint8_t ledOffset)
 {
   if (pLEDReceiver->hasDataChanged())
   {
+    if (LogLevel>0)
+    {
+      pLEDReceiver->DebugOutputLedData();
+    }
     for (int index = 0; index < NUM_SOUND_CONTROLLERS; index++)
     {
       ledToSound[index]->processLedData(ledData[ledOffset + index * 3], ledData[ledOffset + index * 3 + 1], ledData[ledOffset + index * 3 + 2]);
@@ -311,7 +323,6 @@ void showCriticalError(const char* message)
   } while (true);
 }
 
-// Event-Handler definieren
 void handleButton(AceButton* button, uint8_t eventType, uint8_t buttonState) 
 {
   switch (eventType) 
@@ -322,30 +333,34 @@ void handleButton(AceButton* button, uint8_t eventType, uint8_t buttonState)
   case AceButton::kEventLongPressed:
     longPress();
     break;
-    // Weitere Events wie kEventDoubleClicked hinzufügen, falls nötig
   }
 }
 
-// ... (Callbacks bleiben gleich)
 void shortPress() 
 {
-  LogLevel = 3;
   switch (logState)
   {
   case 0:
-    MLLAPP_LOG(3, "Log for MLLSoundTiny enabled\n");
-    MLLSoundTiny::LogLevel = 1;
+    LogLevel = 3;
+    MLLAPP_LOG(3, "Log for main application enabled\n");
+    MLLSoundTiny::LogLevel = 0;
     MLLServoConfigurator::LogLevel = 0;
     FlashStorage::LogLevel = 0;
     logState = 1;
     break;
   case 1:
-    MLLAPP_LOG(3, "Log for MLLServoConfigurator enabled\n");
-    MLLSoundTiny::LogLevel = 0;
-    MLLServoConfigurator::LogLevel = 1;
+    MLLAPP_LOG(3, "Log for MLLSoundTiny enabled\n");
+    MLLSoundTiny::LogLevel = 4;
+    FlashStorage::LogLevel = 0;
     logState = 2;
     break;
   case 2:
+    MLLAPP_LOG(3, "Log for MLLServoConfigurator enabled\n");
+    MLLSoundTiny::LogLevel = 0;
+    MLLServoConfigurator::LogLevel = 1;
+    logState = 3;
+    break;
+  case 3:
     MLLAPP_LOG(3, "Log for FlashStorage enabled\n");
     FlashStorage::LogLevel = 4;
     logState = 0;
